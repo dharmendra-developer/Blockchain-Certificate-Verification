@@ -1,0 +1,16 @@
+{% extends "base.html" %}{% block content %}
+<section class="hero">
+<h1>Blockchain Certificate Verification</h1>
+<p>Issue, store, and verify certificate hashes using Ethereum-compatible blockchain technology.</p>
+<div class="status">Blockchain: <b>{{ "Connected" if blockchain.connected else "Offline / Not Configured" }}</b></div>
+</section>
+<div class="actions">
+{% if session.get('authority_authenticated') %}<a class="btn" href="{{ url_for('issue') }}">+ Issue Certificate</a>
+{% else %}<a class="btn" href="{{ url_for('login') }}">Authority Login to Issue</a>{% endif %}
+<a class="btn secondary" href="{{ url_for('verify_page') }}">Verify Certificate</a>
+</div>
+<h2>Issued Certificates</h2>
+<table><tr><th>ID</th><th>Student</th><th>Course</th><th>Date</th><th>Action</th></tr>
+{% for c in certificates %}<tr><td>{{c.certificate_id}}</td><td>{{c.student_name}}</td><td>{{c.course}}</td><td>{{c.issue_date}}</td><td><a href="{{url_for('certificate',certificate_id=c.certificate_id)}}">View</a></td></tr>{% else %}<tr><td colspan="5">No certificates yet.</td></tr>{% endfor %}
+</table>
+{% endblock %}

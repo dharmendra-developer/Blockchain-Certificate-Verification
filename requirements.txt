@@ -1,0 +1,5 @@
+Flask>=3.0,<4
+web3>=7,<8
+qrcode[pil]>=7.4,<9
+Pillow>=10,<12
+reportlab>=4,<5

@@ -1,0 +1,12 @@
+{% extends "base.html" %}{% block content %}
+<section class="login-panel">
+<p class="eyebrow">CERTIFICATE AUTHORITY</p>
+<h1>Authority sign in</h1>
+<p class="login-intro">Sign in to issue and register certificates.</p>
+<form method="post" class="card login-form">
+<label>Username<input name="username" autocomplete="username" required autofocus></label>
+<label>Password<input type="password" name="password" autocomplete="current-password" required></label>
+<button class="btn" type="submit">Sign in</button>
+</form>
+</section>
+{% endblock %}

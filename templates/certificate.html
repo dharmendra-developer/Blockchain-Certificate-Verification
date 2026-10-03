@@ -1,0 +1,17 @@
+{% extends "base.html" %}{% block content %}
+<div class="card">
+<h1>Certificate Record</h1>
+<p><a class="btn" href="{{url_for('download_certificate',certificate_id=cert.certificate_id)}}">Download Certificate PDF</a></p>
+<p><b>Certificate ID:</b> {{cert.certificate_id}}</p>
+<p><b>Student:</b> {{cert.student_name}}</p>
+<p><b>Course:</b> {{cert.course}}</p>
+<p><b>Institute:</b> {{cert.institute}}</p>
+<p><b>Program Dates:</b> {{cert.start_date or "Not provided"}} to {{cert.end_date or "Not provided"}}</p>
+<p><b>Program Description:</b> {{cert.description or "Not provided"}}</p>
+<p><b>Issue Date:</b> {{cert.issue_date}}</p>
+<p><b>SHA-256 Hash:</b><code>{{cert.certificate_hash}}</code></p>
+<p><b>Transaction Hash:</b><code>{{cert.transaction_hash or "Blockchain not configured"}}</code></p>
+<img class="qr" src="{{url_for('qr',filename=cert.qr_filename)}}" alt="Verification QR">
+<p>Scan the QR code to open the verification page.</p>
+</div>
+{% endblock %}

@@ -1,0 +1,16 @@
+{% extends "base.html" %}{% block content %}
+<h1>Verify Certificate</h1>
+<form method="get" class="card inline"><input id="cid" name="certificate_id" placeholder="Enter Certificate ID" required><button class="btn">Verify</button></form>
+{% if result %}
+<div class="card {{'valid' if result.valid else 'invalid'}}">
+<h2>{{ "✓ Valid" if result.valid else "✗ Verification Failed" }}</h2><p>{{result.message}}</p>
+{% if result.cert %}
+<p><b>Student:</b> {{result.cert.student_name}}</p><p><b>Course:</b> {{result.cert.course}}</p><p><b>Certificate ID:</b> {{result.cert.certificate_id}}</p>
+{% endif %}
+</div>
+{% endif %}
+<script>
+const params = new URLSearchParams(location.search);
+if(params.get("certificate_id")) document.getElementById("cid").value=params.get("certificate_id");
+</script>
+{% endblock %}

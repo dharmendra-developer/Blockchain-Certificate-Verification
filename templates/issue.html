@@ -1,0 +1,15 @@
+{% extends "base.html" %}{% block content %}
+<h1>Issue Certificate</h1>
+<form method="post" class="card">
+<label>Student Name<input name="student_name" required></label>
+<label>Course / Program<input name="course" required></label>
+<label>Institute<input name="institute" required></label>
+<label>Issue Date<input type="date" name="issue_date" required></label>
+<div class="date-fields">
+<label>Program Start Date<input type="date" name="start_date" required></label>
+<label>Program End Date<input type="date" name="end_date" required></label>
+</div>
+<label>Program Description<textarea name="description" rows="4" maxlength="500" required placeholder="Describe the program, key topics, and learning outcomes."></textarea></label>
+<button class="btn" type="submit">Generate & Register</button>
+</form>
+{% endblock %}
