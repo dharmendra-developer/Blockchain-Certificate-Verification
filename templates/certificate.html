@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block extra_head %}<link rel="stylesheet" href="{{ url_for('static', filename='css/certificate-reference.css') }}">{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{{ url_for('static', filename='css/certificate.css') }}">{% endblock %}
 {% block content %}
 <section class="certificate-page">
 <div class="certificate-actions">
@@ -10,11 +10,13 @@
 </div>
 <article class="certificate-sheet" aria-label="Certificate of completion">
 <div class="certificate-frame" aria-hidden="true"></div>
+<div class="certificate-edge certificate-edge-left" aria-hidden="true"></div>
+<div class="certificate-edge certificate-edge-right" aria-hidden="true"></div>
 <div class="certificate-content">
 <header class="certificate-heading">
+<p class="certificate-issuer">{{ cert.institute }}</p>
 <h1>Certificate</h1>
 <p class="certificate-subtitle">of Completion</p>
-<p class="certificate-issuer">{{ cert.institute }}</p>
 </header>
 <p class="certificate-presented">This is to certify that</p>
 <p class="certificate-student">{{ cert.student_name }}</p>
@@ -31,17 +33,22 @@
 
 <footer class="certificate-lower">
 <div class="certificate-signature">
+<strong>{{ cert.institute }}</strong>
 <span>Authorized Signatory</span>
 </div>
-<img class="certificate-seal" src="{{ url_for('static', filename='certificate-award-seal.png') }}" alt="Award seal with graduation cap">
+<div class="certificate-seal" aria-label="Blockchain verified seal"><strong>BC</strong><span>Verified</span></div>
+<div class="certificate-signature certificate-date-signature">
+<strong>{{ cert.issue_date }}</strong>
+<span>Date of Issue</span>
+</div>
 <div class="certificate-qr">
 {% if cert.qr_filename %}<img src="{{ url_for('qr', filename=cert.qr_filename) }}" alt="Certificate verification QR code">{% endif %}
 <span>Scan to verify</span>
 </div>
 </footer>
+<div class="certificate-fingerprint"><span>SHA-256 fingerprint</span><code>{{ cert.certificate_hash }}</code></div>
 {% if cert.transaction_hash %}<div class="certificate-transaction"><span>Blockchain transaction</span><code>{{ cert.transaction_hash }}</code></div>{% endif %}
 </div>
-<div class="certificate-fingerprint"><span>SHA-256 fingerprint</span><code>{{ cert.certificate_hash }}</code></div>
 </article>
 </section>
 {% endblock %}

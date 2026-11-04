@@ -12,6 +12,12 @@ contract CertificateVerification {
 
     mapping(string => Certificate) private certificates;
 
+    address public immutable owner;
+
+    constructor() {
+        owner = msg.sender;
+    }
+
     event CertificateIssued(
         string indexed certificateId,
         string certificateHash,
@@ -23,6 +29,7 @@ contract CertificateVerification {
         string memory certificateId,
         string memory certificateHash
     ) public {
+        require(msg.sender == owner, "Only certificate authority can issue");
         require(!certificates[certificateId].exists, "Certificate already exists");
 
         certificates[certificateId] = Certificate(

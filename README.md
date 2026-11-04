@@ -389,11 +389,7 @@ For actual use, configure your own credentials.
 $env:ADMIN_USERNAME="your-authority-name"
 $env:ADMIN_PASSWORD="your-strong-password"
 $env:FLASK_SECRET_KEY="your-long-random-secret"
-$env:APP_HOST="0.0.0.0"
-$env:PUBLIC_BASE_URL="http://your-computer-lan-ip:5000"
 ```
-
-Set `APP_HOST` and `PUBLIC_BASE_URL` only when scanning certificates from another device on a trusted local network. Use the computer's reachable LAN address for `PUBLIC_BASE_URL`; keep the default loopback host for same-computer testing. Do not expose Flask's debug server to the public internet.
 
 Then start the application.
 
