@@ -11,6 +11,6 @@
 </div>
 <h2>Issued Certificates</h2>
 <table><tr><th>ID</th><th>Student</th><th>Course</th><th>Date</th><th>Action</th></tr>
-{% for c in certificates %}<tr><td>{{c.certificate_id}}</td><td>{{c.student_name}}</td><td>{{c.course}}</td><td>{{c.issue_date}}</td><td><a href="{{url_for('certificate',certificate_id=c.certificate_id)}}">View</a></td></tr>{% else %}<tr><td colspan="5">No certificates yet.</td></tr>{% endfor %}
+{% for c in certificates %}<tr><td>{{c.certificate_id}}</td><td>{{c.student_name}}</td><td>{{c.course}}</td><td>{{c.issue_date}}</td><td><a href="{{url_for('certificate',certificate_id=c.certificate_id)}}">View</a><form method="post" action="{{ url_for('delete_certificate', certificate_id=c.certificate_id) }}" onsubmit="return confirm('Delete this certificate from the local registry? Any blockchain record cannot be deleted.');"><button class="btn secondary" type="submit">Delete</button></form></td></tr>{% else %}<tr><td colspan="5">No certificates yet.</td></tr>{% endfor %}
 </table>
 {% endblock %}

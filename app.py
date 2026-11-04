@@ -7,8 +7,7 @@ from blockchain.blockchain import BlockchainClient
 from utils.qr_generator import create_qr
 from utils.hashing import certificate_hash
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import landscape, letter
-from reportlab.lib.units import inch
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.utils import simpleSplit
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfgen import canvas
@@ -23,6 +22,8 @@ app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-only-change-this-secret-key")
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "authority")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "Authority@123")
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
+APP_HOST = os.getenv("APP_HOST", "127.0.0.1")
 
 # Blockchain connection is optional at startup. The UI remains usable if Ganache is not running.
 blockchain = BlockchainClient()
@@ -49,7 +50,7 @@ def init_db():
             transaction_hash TEXT,
             qr_filename TEXT,
             created_at TEXT NOT NULL
-        )
+            )
     """)
     existing_columns = {row[1] for row in conn.execute("PRAGMA table_info(certificates)")}
     for column in ("start_date", "end_date", "description"):
@@ -62,10 +63,16 @@ def authority_required(view):
     @wraps(view)
     def wrapped_view(*args, **kwargs):
         if not session.get("authority_authenticated"):
-            flash("Please sign in as the certificate authority to issue certificates.", "danger")
+            flash("Please sign in as the certificate authority to view certificates.", "danger")
             return redirect(url_for("login"))
         return view(*args, **kwargs)
     return wrapped_view
+
+@app.before_request
+def protect_qr_files():
+    if request.path.startswith("/static/qr/") and not session.get("authority_authenticated"):
+        flash("Please sign in as the certificate authority to view certificates.", "danger")
+        return redirect(url_for("login"))
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -76,7 +83,7 @@ def login():
             session.clear()
             session["authority_authenticated"] = True
             flash("Certificate authority signed in.", "success")
-            return redirect(url_for("issue"))
+            return redirect(url_for("index"))
         flash("Username or password is incorrect.", "danger")
     return render_template("login.html")
 
@@ -87,6 +94,7 @@ def logout():
     return redirect(url_for("login"))
 
 @app.route("/")
+@authority_required
 def index():
     conn = db()
     certificates = conn.execute("SELECT * FROM certificates ORDER BY id DESC").fetchall()
@@ -138,7 +146,8 @@ def issue():
             except Exception as exc:
                 flash(f"Blockchain transaction failed: {exc}", "danger")
 
-        verify_url = request.url_root.rstrip("/") + url_for("verify", certificate_id=certificate_id)
+        verify_path = url_for("verify", certificate_id=certificate_id)
+        verify_url = f"{PUBLIC_BASE_URL}{verify_path}" if PUBLIC_BASE_URL else request.url_root.rstrip("/") + verify_path
         qr_filename = create_qr(verify_url, QR_DIR, certificate_id)
 
         conn = db()
@@ -157,6 +166,7 @@ def issue():
     return render_template("issue.html")
 
 @app.route("/certificate/<certificate_id>")
+@authority_required
 def certificate(certificate_id):
     conn = db()
     cert = conn.execute("SELECT * FROM certificates WHERE certificate_id=?", (certificate_id,)).fetchone()
@@ -165,7 +175,41 @@ def certificate(certificate_id):
         return "Certificate not found", 404
     return render_template("certificate.html", cert=cert)
 
+@app.route("/certificate/<certificate_id>/delete", methods=["POST"])
+@authority_required
+def delete_certificate(certificate_id):
+    conn = db()
+    cert = conn.execute(
+        "SELECT qr_filename FROM certificates WHERE certificate_id=?",
+        (certificate_id,)
+    ).fetchone()
+    if not cert:
+        conn.close()
+        flash("Certificate not found.", "danger")
+        return redirect(url_for("index"))
+
+    conn.execute("DELETE FROM certificates WHERE certificate_id=?", (certificate_id,))
+    conn.commit()
+    conn.close()
+
+    qr_filename = cert["qr_filename"] or ""
+    if qr_filename and os.path.basename(qr_filename) == qr_filename:
+        try:
+            os.remove(os.path.join(QR_DIR, qr_filename))
+        except FileNotFoundError:
+            pass
+        except OSError:
+            flash("The certificate was deleted, but its QR image could not be removed.", "danger")
+
+    flash(
+        f"Certificate {certificate_id} was deleted from the local registry. "
+        "Any blockchain record remains immutable.",
+        "success"
+    )
+    return redirect(url_for("index"))
+
 @app.route("/certificate/<certificate_id>/download")
+@authority_required
 def download_certificate(certificate_id):
     conn = db()
     cert = conn.execute("SELECT * FROM certificates WHERE certificate_id=?", (certificate_id,)).fetchone()
@@ -174,130 +218,221 @@ def download_certificate(certificate_id):
         return "Certificate not found", 404
 
     pdf_buffer = BytesIO()
-    page_width, page_height = landscape(letter)
+    page_width, page_height = landscape(A4)
     pdf = canvas.Canvas(pdf_buffer, pagesize=(page_width, page_height), pageCompression=1)
     pdf.setTitle(f"Certificate {cert['certificate_id']}")
     pdf.setAuthor("BlockCert Certificate Authority")
     pdf.setSubject(f"Certificate issued to {cert['student_name']}")
 
-    navy = colors.HexColor("#183047")
-    gold = colors.HexColor("#b28a45")
-    muted = colors.HexColor("#667085")
-    paper = colors.HexColor("#fffdf8")
-    pdf.setFillColor(paper)
+    ink = colors.HexColor("#12314a")
+    cyan = colors.HexColor("#087f84")
+    gold = colors.HexColor("#d0aa59")
+    muted = colors.HexColor("#59616b")
+    pdf.setFillColor(cyan)
     pdf.rect(0, 0, page_width, page_height, stroke=0, fill=1)
-    pdf.setStrokeColor(navy)
-    pdf.setLineWidth(2)
-    pdf.rect(24, 24, page_width - 48, page_height - 48, stroke=1, fill=0)
-    pdf.setStrokeColor(gold)
-    pdf.setLineWidth(0.8)
-    pdf.rect(33, 33, page_width - 66, page_height - 66, stroke=1, fill=0)
 
-    pdf.setFillColor(navy)
-    pdf.setFont("Helvetica-Bold", 11)
-    pdf.drawCentredString(page_width / 2, page_height - 72, "BLOCKCERT")
+    def draw_sweep(start, control_one, control_two, end, color, width):
+        path = pdf.beginPath()
+        path.moveTo(*start)
+        path.curveTo(*control_one, *control_two, *end)
+        pdf.setStrokeColor(color)
+        pdf.setLineWidth(width)
+        pdf.setLineCap(1)
+        pdf.drawPath(path, stroke=1, fill=0)
+
+    left_sweep = ((0, page_height * 0.56), (45, 430), (210, 565), (470, page_height))
+    right_sweep = ((page_width, 315), (795, 170), (625, 34), (485, 0))
+    for sweep in (left_sweep, right_sweep):
+        draw_sweep(*sweep, ink, 64)
+        draw_sweep(*sweep, cyan, 52)
+        draw_sweep(*sweep, gold, 12)
+
+    panel = pdf.beginPath()
+    panel.moveTo(0, page_height * 0.56)
+    panel.curveTo(45, 430, 210, 565, 470, page_height)
+    panel.lineTo(page_width, page_height)
+    panel.lineTo(page_width, 315)
+    panel.curveTo(795, 170, 625, 34, 485, 0)
+    panel.lineTo(0, 0)
+    panel.close()
+    pdf.setFillColor(colors.white)
+    pdf.drawPath(panel, stroke=0, fill=1)
+
+    pdf.saveState()
+    pdf.clipPath(panel, stroke=0, fill=0)
+    pdf.setStrokeColor(gold)
+    pdf.setLineWidth(3.2)
+    pdf.rect(36, 18, page_width - 68, page_height - 36, stroke=1, fill=0)
+    pdf.setStrokeColor(ink)
+    pdf.setLineWidth(1.35)
+    pdf.rect(45, 27, page_width - 86, page_height - 54, stroke=1, fill=0)
     pdf.setFillColor(gold)
-    pdf.setFont("Helvetica", 8)
-    pdf.drawCentredString(page_width / 2, page_height - 87, "DIGITAL CREDENTIAL")
-    pdf.setStrokeColor(gold)
-    pdf.line(page_width / 2 - 34, page_height - 98, page_width / 2 + 34, page_height - 98)
-
-    pdf.setFillColor(navy)
-    pdf.setFont("Times-Bold", 25)
-    pdf.drawCentredString(page_width / 2, page_height - 142, "CERTIFICATE OF ACHIEVEMENT")
-    pdf.setFillColor(muted)
-    pdf.setFont("Helvetica", 9)
-    pdf.drawCentredString(page_width / 2, page_height - 174, "THIS CERTIFICATE IS PRESENTED TO")
-
-    student_name = cert["student_name"]
-    name_size = 30
-    while name_size > 18 and pdfmetrics.stringWidth(student_name, "Times-Bold", name_size) > page_width - 150:
-        name_size -= 1
-    pdf.setFillColor(navy)
-    pdf.setFont("Times-Bold", name_size)
-    pdf.drawCentredString(page_width / 2, page_height - 214, student_name)
-    pdf.setStrokeColor(gold)
-    pdf.setLineWidth(1)
-    pdf.line(page_width / 2 - 72, page_height - 227, page_width / 2 + 72, page_height - 227)
-
-    pdf.setFillColor(muted)
-    pdf.setFont("Helvetica", 10)
-    pdf.drawCentredString(page_width / 2, page_height - 253, "for successfully completing")
-    course_lines = simpleSplit(cert["course"], "Times-Bold", 19, page_width - 170)
-    pdf.setFillColor(navy)
-    pdf.setFont("Times-Bold", 19)
-    course_y = page_height - 284
-    for line in course_lines[:2]:
-        pdf.drawCentredString(page_width / 2, course_y, line)
-        course_y -= 24
-
-    issuer_y = course_y - 10
-    pdf.setFillColor(muted)
-    pdf.setFont("Helvetica", 8)
-    pdf.drawCentredString(page_width / 2, issuer_y, "ISSUED BY")
-    issuer_lines = simpleSplit(cert["institute"], "Helvetica-Bold", 12, page_width - 190)
-    pdf.setFillColor(navy)
-    pdf.setFont("Helvetica-Bold", 12)
-    for index, line in enumerate(issuer_lines[:2]):
-        pdf.drawCentredString(page_width / 2, issuer_y - 19 - index * 15, line)
-
-    pdf.setFont("Helvetica-Bold", 7)
-    pdf.setFillColor(muted)
-    pdf.drawCentredString(page_width / 2, issuer_y - 19 - (len(issuer_lines[:2]) - 1) * 15 - 20, "PROGRAM PERIOD")
-    period_value = f"{cert['start_date'] or 'Not provided'} to {cert['end_date'] or 'Not provided'}"
-    pdf.setFont("Helvetica", 9)
-    pdf.setFillColor(navy)
-    period_y = issuer_y - 19 - (len(issuer_lines[:2]) - 1) * 15 - 34
-    pdf.drawCentredString(page_width / 2, period_y, period_value)
-
-    description_label_y = period_y - 21
-    pdf.setFont("Helvetica-Bold", 7)
-    pdf.setFillColor(muted)
-    pdf.drawCentredString(page_width / 2, description_label_y, "PROGRAM DESCRIPTION")
-    pdf.setFont("Helvetica", 8)
-    pdf.setFillColor(navy)
-    description_lines = simpleSplit(cert["description"] or "Program description not provided.", "Helvetica", 8, page_width - 190)
-    description_y = description_label_y - 13
-    for line in description_lines[:4]:
-        pdf.drawCentredString(page_width / 2, description_y, line)
-        description_y -= 10
-
-    metadata_y = 112
-    pdf.setStrokeColor(colors.HexColor("#d9d2c4"))
-    pdf.line(68, metadata_y + 17, page_width - 68, metadata_y + 17)
-    pdf.setFont("Helvetica-Bold", 7)
-    pdf.setFillColor(muted)
-    pdf.drawString(72, metadata_y, "ISSUE DATE")
-    pdf.drawString(205, metadata_y, "PROGRAM DATES")
-    pdf.drawString(420, metadata_y, "CERTIFICATE ID")
-    pdf.setFont("Helvetica", 8)
-    pdf.setFillColor(navy)
-    pdf.drawString(72, metadata_y - 13, cert["issue_date"])
-    pdf.drawString(205, metadata_y - 13, f"{cert['start_date'] or '-'} to {cert['end_date'] or '-'}")
-    pdf.drawString(420, metadata_y - 13, cert["certificate_id"])
-    pdf.setFont("Helvetica-Bold", 7)
-    pdf.setFillColor(muted)
-    pdf.drawString(72, metadata_y - 34, "SHA-256 FINGERPRINT")
-    pdf.setFont("Courier", 6.5)
-    pdf.setFillColor(navy)
-    pdf.drawString(72, metadata_y - 46, cert["certificate_hash"])
-    if cert["transaction_hash"]:
-        pdf.setFont("Helvetica-Bold", 7)
-        pdf.setFillColor(muted)
-        pdf.drawString(72, metadata_y - 61, "BLOCKCHAIN TRANSACTION")
-        pdf.setFont("Courier", 6)
-        pdf.setFillColor(navy)
-        pdf.drawString(72, metadata_y - 72, cert["transaction_hash"][:80])
+    for pin_x, pin_y in ((36, 18), (page_width - 32, 18),
+                         (36, page_height - 18), (page_width - 32, page_height - 18)):
+        pdf.circle(pin_x, pin_y, 3.8, stroke=0, fill=1)
+    pdf.restoreState()
 
     qr_path = os.path.join(QR_DIR, cert["qr_filename"] or "")
+    qr_x = page_width - 108
+    qr_y = 50
+    qr_size = 72
+    pdf.setFillColor(colors.white)
+    pdf.setStrokeColor(colors.HexColor("#c9ced8"))
+    pdf.setLineWidth(0.7)
+    pdf.roundRect(qr_x - 4, qr_y - 11, qr_size + 8, qr_size + 24, 3, stroke=1, fill=1)
     if os.path.isfile(qr_path):
-        qr_size = 0.95 * inch
-        pdf.drawImage(qr_path, page_width - 72 - qr_size, 63, width=qr_size, height=qr_size,
+        pdf.drawImage(qr_path, qr_x, qr_y, width=qr_size, height=qr_size,
                       preserveAspectRatio=True, mask="auto")
-        pdf.setFont("Helvetica-Bold", 6.5)
-        pdf.setFillColor(muted)
-        pdf.drawCentredString(page_width - 72 - qr_size / 2, 53, "SCAN TO VERIFY")
+    pdf.setFillColor(muted)
+    pdf.setFont("Helvetica-Bold", 6)
+    pdf.drawCentredString(qr_x + qr_size / 2, qr_y - 9, "SCAN TO VERIFY")
 
+    pdf.setFillColor(ink)
+    pdf.setFont("Times-Bold", 50)
+    pdf.drawCentredString(page_width / 2, 478, "CERTIFICATE")
+    pdf.setFillColor(ink)
+    pdf.setFont("Times-Italic", 20)
+    pdf.drawCentredString(page_width / 2, 450, "of Completion")
+
+    institution_font = 30
+    institution_lines = simpleSplit(cert["institute"], "Helvetica-Bold", institution_font, 560)
+    if len(institution_lines) > 1:
+        institution_font = 18
+        institution_lines = simpleSplit(cert["institute"], "Helvetica-Bold", institution_font, 560)
+    while len(institution_lines) > 2 and institution_font > 10:
+        institution_font -= 1
+        institution_lines = simpleSplit(cert["institute"], "Helvetica-Bold", institution_font, 560)
+    if len(institution_lines) > 2:
+        institution_lines = institution_lines[:2]
+        last_line = institution_lines[-1]
+        while last_line and pdfmetrics.stringWidth(last_line + "...", "Helvetica-Bold", institution_font) > 560:
+            last_line = last_line[:-1]
+        institution_lines[-1] = last_line.rstrip() + "..."
+    pdf.setFillColor(ink)
+    pdf.setFont("Helvetica-Bold", institution_font)
+    institution_y = 430 if len(institution_lines) > 1 else 424
+    for line in institution_lines:
+        pdf.drawCentredString(page_width / 2, institution_y, line)
+        institution_y -= institution_font + 1
+    pdf.setStrokeColor(gold)
+    pdf.setLineWidth(1.2)
+    pdf.line(page_width / 2 - 28, 403, page_width / 2 + 28, 403)
+
+    pdf.setFillColor(muted)
+    pdf.setFont("Times-Roman", 18)
+    presented_y = 390
+    pdf.drawCentredString(page_width / 2, presented_y, "This is to certify that")
+
+    name_font = 38
+    name_lines = simpleSplit(cert["student_name"], "Times-Italic", name_font, 600)
+    while len(name_lines) > 2 and name_font > 22:
+        name_font -= 2
+        name_lines = simpleSplit(cert["student_name"], "Times-Italic", name_font, 600)
+    if len(name_lines) > 2:
+        name_lines = name_lines[:2]
+        last_line = name_lines[-1]
+        while last_line and pdfmetrics.stringWidth(last_line + "...", "Times-Italic", name_font) > 600:
+            last_line = last_line[:-1]
+        name_lines[-1] = last_line.rstrip() + "..."
+
+    name_y = 344
+    name_step = name_font + 2
+    pdf.setFillColor(ink)
+    pdf.setFont("Times-Italic", name_font)
+    for line in name_lines:
+        pdf.drawCentredString(page_width / 2, name_y, line)
+        name_y -= name_step
+
+    rule_y = 344 - (len(name_lines) - 1) * name_step - 18
+    pdf.setStrokeColor(colors.HexColor("#293346"))
+    pdf.setLineWidth(0.8)
+    pdf.line(205, rule_y, page_width - 205, rule_y)
+    recognition_y = rule_y - 24
+    pdf.setFillColor(muted)
+    pdf.setFont("Times-Roman", 18)
+    pdf.drawCentredString(page_width / 2, recognition_y, "has successfully completed")
+
+    course_font = 18
+    course_lines = simpleSplit(cert["course"], "Times-Bold", course_font, 590)
+    while len(course_lines) > 2 and course_font > 14:
+        course_font -= 2
+        course_lines = simpleSplit(cert["course"], "Times-Bold", course_font, 590)
+    if len(course_lines) > 2:
+        course_lines = course_lines[:2]
+        last_line = course_lines[-1]
+        while last_line and pdfmetrics.stringWidth(last_line + "...", "Times-Bold", course_font) > 590:
+            last_line = last_line[:-1]
+        course_lines[-1] = last_line.rstrip() + "..."
+
+    course_y = recognition_y - 28
+    course_step = course_font + 3
+    pdf.setFillColor(ink)
+    pdf.setFont("Times-Bold", course_font)
+    for line in course_lines:
+        pdf.drawCentredString(page_width / 2, course_y, line)
+        course_y -= course_step
+
+    if cert["description"]:
+        description_font = 15
+        description_width = 570
+        description_lines = simpleSplit(
+            cert["description"], "Times-Roman", description_font, description_width
+        )
+        description_y = course_y - 7
+        available_height = max(0, description_y - 165)
+        while (len(description_lines) * (description_font + 2) > available_height
+               and description_font > 6):
+            description_font -= 1
+            description_width = min(640, description_width + 16)
+            description_lines = simpleSplit(
+                cert["description"], "Times-Roman", description_font, description_width
+            )
+        pdf.setFillColor(muted)
+        pdf.setFont("Times-Roman", description_font)
+        for line in description_lines:
+            pdf.drawCentredString(page_width / 2, description_y, line)
+            description_y -= description_font + 2
+
+    pdf.setStrokeColor(colors.HexColor("#c5ccda"))
+    pdf.line(155, 157, page_width - 155, 157)
+    metadata = (
+        (225, "ISSUE DATE", cert["issue_date"]),
+        (page_width / 2, "PROGRAM PERIOD", f"{cert['start_date'] or 'Not provided'} to {cert['end_date'] or 'Not provided'}"),
+        (617, "CERTIFICATE ID", cert["certificate_id"]),
+    )
+    for center_x, label, value in metadata:
+        pdf.setFillColor(muted)
+        pdf.setFont("Helvetica-Bold", 8)
+        pdf.drawCentredString(center_x, 145, label)
+        pdf.setFillColor(ink)
+        pdf.setFont("Helvetica", 9)
+        pdf.drawCentredString(center_x, 131, value)
+
+    pdf.setStrokeColor(ink)
+    pdf.setLineWidth(0.7)
+    pdf.line(138, 83, 268, 83)
+    pdf.setFillColor(muted)
+    pdf.setFont("Helvetica-Bold", 8)
+    pdf.drawCentredString(203, 56, "AUTHORIZED SIGNATORY")
+
+    seal_path = os.path.join(BASE_DIR, "static", "certificate-award-seal.png")
+    if os.path.isfile(seal_path):
+        pdf.drawImage(seal_path, page_width / 2 - 41, 37, width=82, height=82,
+                      preserveAspectRatio=True, mask="auto")
+
+    pdf.setFillColor(muted)
+    pdf.setFont("Helvetica-Bold", 7)
+    pdf.drawString(112, 9, "SHA-256")
+    pdf.setFillColor(ink)
+    pdf.setFont("Courier", 7)
+    pdf.drawString(151, 9, cert["certificate_hash"])
+    if cert["transaction_hash"]:
+        pdf.setFillColor(muted)
+        pdf.setFont("Helvetica-Bold", 6)
+        pdf.drawString(112, 31, "BLOCKCHAIN TX")
+        pdf.setFillColor(ink)
+        pdf.setFont("Courier", 6)
+        pdf.drawString(184, 31, cert["transaction_hash"][:76])
     pdf.save()
     pdf_buffer.seek(0)
     return send_file(
@@ -337,6 +472,7 @@ def verify(certificate_id):
     })
 
 @app.route("/api/verify/<certificate_id>")
+@authority_required
 def api_verify(certificate_id):
     conn = db()
     cert = conn.execute("SELECT * FROM certificates WHERE certificate_id=?", (certificate_id,)).fetchone()
@@ -351,9 +487,10 @@ def api_verify(certificate_id):
     return {"valid": valid, "certificate": dict(cert), "blockchain": chain}
 
 @app.route("/qr/<filename>")
+@authority_required
 def qr(filename):
     return send_from_directory(QR_DIR, filename)
 
 if __name__ == "__main__":
     init_db()
-    app.run(debug=True, host="127.0.0.1", port=5000)
+    app.run(debug=True, host=APP_HOST, port=5000)
